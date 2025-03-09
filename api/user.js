@@ -2,7 +2,7 @@ const express = require('express');
 const router = express.Router();
 
 // mongodb user model
-const User = require('./../models/user');
+const User = require('../models/userModel');
 
 // mongodb user verification model
 const UserVerification = require('./../models/UserVerification');
@@ -100,16 +100,14 @@ router.post('/signup', (req, res) => {
                 email,
                 password: hashedPassword,
                 dateOfBirth,
+                verified: false,
               });
 
               newUser
                 .save()
                 .then((result) => {
-                  res.json({
-                    status: 'SUCCESS',
-                    message: 'Signup successful',
-                    data: result,
-                  });
+                  // handle account verification
+                  sendVerificationEmail(result, res);
                 })
                 .catch((err) => {
                   res.json({
@@ -134,6 +132,83 @@ router.post('/signup', (req, res) => {
         });
       });
   }
+});
+
+// send verification email
+const sendVerificationEmail = ({ _id, email }, res) => {
+  // url to be used in the email
+  const currentUrl = 'http://localhost:5000/';
+
+  const uniqueString = uuidv4() + _id;
+
+  // mail options
+  const mailOptions = {
+    from: process.env.AUTH_EMAIL,
+    to: email,
+    subject: 'Verify Your Email',
+    html: `<p>Verify your email to complete the signup and login into your account.<p>This link<b>expires in 6 hours</b>.</p></p><p>Press <a href=${
+      currentUrl + 'user/verify/' + _id + '/' + uniqueString
+    }>here</a> to proceed.</p>`,
+  };
+
+  // hash the uniqueString
+  const saltRounds = 10;
+  bcrypt
+    .hash(uniqueString, saltRounds)
+    .then((hashedUniqueString) => {
+      // set values in userVerification collection
+      const newVerification = new UserVerification({
+        userId: _id,
+        uniqueString: hashedUniqueString,
+        createdAt: Date.now(),
+        expiresAt: Date.now() + 21600000,
+      });
+
+      newVerification
+        .save()
+        .then(() => {
+          transporter
+            .sendMail(mailOptions)
+            .then(() => {
+              // email sent and verification record saved
+              res.json({
+                status: 'PENDING',
+                message: 'Verification email sent',
+              });
+            })
+            .catch((error) => {
+              console.log(error);
+              res.json({
+                status: 'FAILED',
+                message: 'Verification email failed!',
+              });
+            });
+        })
+        .catch((error) => {
+          console.log(error);
+          res.json({
+            status: 'FAILED',
+            message: "Couldn't save verification email data!",
+          });
+        });
+    })
+    .catch(() => {
+      res.json({
+        status: 'FAILED',
+        message: 'An error occured while hashing email data!',
+      });
+    });
+};
+
+// verify email
+router.get('/verify/:userId/:uniqueString', (req, res) => {
+  let { userId, uniqueString } = req.params;
+
+  UserVerification.find({ userId })
+    .then()
+    .catch((error) => {
+      console.log(error);
+    });
 });
 
 // Signin
